@@ -39,7 +39,7 @@ main = script do
   alicesNft <- submitMulti [band, alice] [] do
     createCmd (NFT.NFT band "Metal Storm" alice public)
 
-  -- cid <- submitMulti [mallory] [public] do
-  --     exerciseCmd (toInterfaceContractId @NFTBackDoor alicesNft) (BackDoor mallory)
+  cid <- submitMulti [mallory] [public] do
+      exerciseCmd (toInterfaceContractId @NFTBackDoor alicesNft) (BackDoor mallory)
 
   pure ()
