@@ -1,0 +1,83 @@
+---------------------------------------
+---- Mitigation 2: Check Signatories --
+---------------------------------------
+
+{-# LANGUAGE ApplicativeDo #-}
+
+module K_SafeHelper where
+
+import qualified A_Asset as Asset
+import qualified B_RockBandNFT as NFT
+import qualified E_Iou as CorrectIou
+import qualified I_MaliciousIou as MaliciousIou
+
+import DA.List as L
+import DA.Set as S
+import Daml.Script
+
+template Helper with
+    owner: Party
+    -- The owner trusts that the signatories have performed due diligence
+    -- on the package they vetted.
+    trustedParties: Set Party
+  where
+    signatory owner
+    nonconsuming choice SafeAccept : ContractId Asset.Asset with
+        porposalId: ContractId Asset.Proposal
+      controller owner
+      do
+        proposal <- fetch porposalId
+        assertMsg "The poposal is not signed by any trusted parties" $
+          any (\x -> S.member x trustedParties) (signatory proposal)
+        exercise porposalId Asset.Accept
+
+main : Script ()
+main = script do
+  band <- allocateParty "Iron Furry"
+  bank <- allocateParty "Bank"
+  alice <- allocateParty "Alice"
+  mallory <- allocateParty "Mallory"
+  public <- allocateParty "Public"
+
+  helper <- alice `submit` createCmd (Helper alice $ S.fromList [band, bank])
+
+  proposal0 <- band `submit` do
+    cid <- createCmd NFT.Proposal with
+      nft = (NFT.NFT band "Metal Storm" band public)
+      proponee = alice
+    pure $ toInterfaceContractId @Asset.Proposal cid
+
+  nft <- submitMulti [alice] [public] do
+    exerciseCmd helper (SafeAccept proposal0)
+
+  malloryIou <- submitMulti [bank, mallory] [] do
+    createCmd CorrectIou.Iou with
+      issuer = bank
+      owner = mallory
+      amount = 42
+
+  proposal1 <- mallory `submit`
+    exerciseCmd (Asset.toId malloryIou) (Asset.Transfer alice)
+
+  iou1 <- submitMulti [alice] [public] do
+    exerciseCmd helper (SafeAccept proposal1)
+
+  nftIds <- queryFilter @NFT.NFT public (\nft -> nft.band == band)
+
+  proposal2 <- mallory `submit` do
+    cid <- createCmd MaliciousIou.IouProposal with
+      iou = MaliciousIou.Iou with
+        issuer = mallory
+        owner = mallory
+        amount = 42
+      proponee = alice
+      backdoor = Some (toInterfaceContractId (head nftIds)._1)
+    pure $ toInterfaceContractId @Asset.Proposal cid
+
+  -- iou2 <- submitMulti [alice] [public] do
+  --   exerciseCmd proposal2 Asset.Accept
+
+  -- iou2 <- submitMulti [alice] [public] do
+  --   exerciseCmd helper (SafeAccept proposal2)
+
+  pure ()

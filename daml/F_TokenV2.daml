@@ -1,0 +1,74 @@
+--------------------------------------------------
+---- Interfaces provide weak form of upgrade  ----
+--------------------------------------------------
+
+{-# LANGUAGE ApplicativeDo #-}
+
+
+module F_TokenV2 where
+
+import qualified A_Asset as Asset
+import qualified D_Token as TokenV1
+import qualified E_Iou as Iou
+
+import Daml.Script
+
+data View = View with
+    issuer: Party
+    owner: Party
+    amount: Int
+    currency: Text
+  deriving Show
+
+interface Token requires Asset.Asset where
+  viewtype View
+
+  tokenIssuer: Party
+  tokenAmount: Int
+  split: Int -> Update (ContractId Token, ContractId Token)
+  -- we add a method to TokenV2.Token w.r.t TokenV1.Token
+  tokenCurrency: Text
+
+  choice Split : (ContractId Token, ContractId Token)
+      with splitAmount : Int
+    controller Asset.assetOwner (toInterface this)
+    do
+      split this splitAmount
+
+  -- Retroactive intances are defined in the body of the interface
+  interface instance Token for Iou.Iou where
+    view = View with
+      issuer = TokenV1.tokenIssuer (toInterface this)
+      owner = Asset.assetOwner (toInterface this)
+      amount = TokenV1.tokenAmount (toInterface this)
+      currency = tokenCurrency (toInterface this)
+    tokenIssuer = TokenV1.tokenIssuer (toInterface this)
+    tokenAmount = TokenV1.tokenAmount (toInterface this)
+    split x = do
+      (cid1, cid2) <- Iou.splitImpl this x
+      pure (toInterfaceContractId cid1, toInterfaceContractId cid2)
+    tokenCurrency = "CHF"
+
+
+main : Script View
+main = script do
+  bank <- allocateParty "Bank"
+  alice <- allocateParty "Alice"
+  bob <- allocateParty "Bob"
+  charly <- allocateParty "Charly"
+
+  alicesIouId <- submitMulti [bank, alice] [] do
+    createCmd Iou.Iou with
+      issuer = bank
+      owner = alice
+      amount = 1
+
+  proposalId <- alice `submit` do
+    exerciseCmd (toInterfaceContractId @Asset.Asset alicesIouId) (Asset.Transfer bob)
+
+  bobsIouId <- bob `submit` do
+     exerciseCmd proposalId Asset.Accept
+
+  Some bobsTokenView <- queryInterfaceContractId @Token bob (coerceContractId bobsIouId)
+
+  pure $ bobsTokenView

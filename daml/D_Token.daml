@@ -1,0 +1,33 @@
+--------------------------------------------------------
+---- Interfaces are usefull to factorize code (1/2) ----
+--------------------------------------------------------
+
+module D_Token where
+
+import qualified A_Asset as Asset
+
+data View = View with
+    issuer: Party
+    owner: Party
+    amount: Int
+  deriving Show
+
+-- interface extensions are replaced by "required" Interface
+interface Token requires Asset.Asset where
+  viewtype View
+  tokenIssuer: Party
+  tokenAmount: Int
+  split: Int -> Update (ContractId Token, ContractId Token)
+
+  choice Split : (ContractId Token, ContractId Token)
+      with splitAmount : Int
+      controller Asset.assetOwner (toInterface this)
+      do
+        split this splitAmount
+
+
+toId: HasToInterface t Token => ContractId t -> ContractId Token
+toId = toInterfaceContractId
+
+fromId: HasFromInterface t Token => ContractId Token -> ContractId t
+fromId = fromInterfaceContractId

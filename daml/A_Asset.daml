@@ -1,0 +1,67 @@
+------------------------------------------
+---- Interface are inspired from Java ----
+------------------------------------------
+
+module A_Asset where
+
+data View = View with
+    owner : Party
+  deriving Show
+
+-- Daml Interfaces are similar to Java abstract classes or Scala Interfaces
+interface Asset where
+  -- Views are mandatory methods with no parameters.
+  -- `viewtype` defines the return type of the view method (must be a record)
+  -- Views are usefull for client applications.
+  viewtype View
+
+  -- Daml methods are similar to abstract Java/Scala methods
+  assetOwner: Party
+  transfer: Party -> Update (ContractId Proposal)
+
+  -- choices are always final.
+  nonconsuming choice Divulge : ()
+    with
+      divulger: Party
+      divulgee: Party
+    observer divulgee
+    controller divulger
+    do
+      pure ()
+
+  -- Choices calling a single Update method, act as "virtual choice".
+  choice Transfer : ContractId Proposal
+    with
+      newOwner : Party
+    controller assetOwner this
+    do
+      transfer this newOwner
+
+interface Proposal where
+  viewtype View
+
+  proposalAsset : Asset
+  proposalProponee : Party
+  accept:  Update (ContractId Asset)
+  cancel: Update (ContractId Asset)
+
+  choice Accept : ContractId Asset
+    controller proposalProponee this
+    do
+      accept this
+
+  choice Cancel : ContractId Asset
+    controller proposalOwner this
+    do
+      cancel this
+
+-- level funtions act as "final methods".
+proposalOwner: Proposal -> Party
+proposalOwner p = assetOwner $ proposalAsset p
+
+
+toId: HasToInterface t Asset => ContractId t -> ContractId Asset
+toId = toInterfaceContractId
+
+fromId: HasFromInterface t Asset => ContractId Asset -> ContractId t
+fromId = fromInterfaceContractId
