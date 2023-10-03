@@ -1,0 +1,166 @@
+---------------------------------------------
+---- Mitigation 1: Restrict implementation --
+---------------------------------------------
+
+{-# LANGUAGE ApplicativeDo #-}
+
+module J_TokenV3 where
+
+import DA.Assert
+import Daml.Script
+
+data View = View with
+    issuer: Party
+    owner: Party
+    amount: Int
+    currency: Text
+  deriving Show
+
+interface Token where
+  viewtype View
+
+  -- Daml methods are similar to abstract Java/Scala methods
+  tokenIssuer: Party
+  tokenOwner: Party
+  setOwner: Party -> Token
+  tokenAmount: Int
+  setAmount: Int -> Token
+  transfer: Party -> Proposal
+  tokenCurrency: Text
+
+  -- no more "virtual" choices but more assertion
+  choice Transfer : ContractId Proposal
+    with
+      newOwner : Party
+    controller tokenOwner this
+    do
+      let proposal = transfer this newOwner
+      -- add assertions to check the methods behave hosnestly
+      assert $ proposalToken proposal == this
+      proposalProponee proposal === newOwner
+      signatory proposal === signatory this
+      create proposal
+
+  nonconsuming choice Divulge : ()
+    with
+      divulger: Party
+      divulgee: Party
+    observer divulgee
+    controller divulger
+    do
+      pure ()
+
+  choice Split : (ContractId Token, ContractId Token)
+    with
+       splitAmount: Int
+    controller tokenOwner this
+    do
+      assert $ 0 < splitAmount && splitAmount < tokenAmount this
+      cid1 <- createWith this (tokenOwner this) splitAmount
+      cid2 <- createWith this (tokenOwner this) (tokenAmount this - splitAmount)
+      pure (cid1, cid2)
+
+createWith : Token -> Party -> Int -> Update (ContractId Token)
+createWith token newOwner newAmount = do
+  let newToken = setOwner (setAmount token newAmount) newOwner
+  tokenIssuer newToken === tokenIssuer token
+  tokenOwner newToken === newOwner
+  tokenAmount newToken === newAmount
+  signatory newToken === signatory token
+  create newToken
+
+interface Proposal where
+  viewtype View
+
+  proposalToken : Token
+  proposalProponee : Party
+
+  choice Accept : ContractId Token
+    controller proposalProponee this
+    do
+      let oldToken = proposalToken this
+      createWith oldToken (proposalProponee this) (tokenAmount oldToken)
+
+  choice Cancel : ContractId Token
+    controller tokenOwner $ proposalToken this
+    do
+      create $ proposalToken this
+
+toId: HasToInterface t Token => ContractId t -> ContractId Token
+toId = toInterfaceContractId
+
+fromId: HasFromInterface t Token => ContractId Token -> ContractId t
+fromId = fromInterfaceContractId
+
+
+template CHFIou
+  with
+    issuer: Party
+    owner: Party
+    amount: Int
+  where
+    signatory issuer, owner
+
+    interface instance Token for CHFIou where
+      view = View issuer owner amount "CHF"
+      tokenIssuer = issuer
+      tokenOwner = owner
+      setOwner newOwner = toInterface $ this with owner = newOwner
+      tokenAmount = amount
+      setAmount newAmount = toInterface $ this with amount = newAmount
+      transfer p = toInterface $ CHFIouProposal this p
+      tokenCurrency = "CHF"
+
+template CHFIouProposal
+  with
+    iou: CHFIou
+    proponee: Party
+  where
+    signatory signatory iou
+    interface instance Proposal for CHFIouProposal where
+      view = View iou.issuer iou.owner iou.amount "CHF"
+      proposalToken = toInterface iou
+      proposalProponee = proponee
+
+template YenIou
+  with
+    issuer: Party
+    owner: Party
+    amount: Int
+  where
+    signatory issuer, owner
+
+    interface instance Token for YenIou where
+      view = View issuer owner amount "Yen"
+      tokenIssuer = issuer
+      tokenOwner = owner
+      setOwner newOwner = toInterface $ this with owner = newOwner
+      tokenAmount = amount
+      setAmount newAmount = toInterface $ this with amount = newAmount
+      transfer p = toInterface $ YenIouProposal this p
+      tokenCurrency = "Yen"
+
+template YenIouProposal
+  with
+    iou: YenIou
+    proponee: Party
+  where
+    signatory signatory iou
+    interface instance Proposal for YenIouProposal where
+      view = View iou.issuer iou.owner iou.amount "Yen"
+      proposalToken = toInterface iou
+      proposalProponee = proponee
+
+main : Script (ContractId Token, ContractId Token)
+main = script do
+  bank <- allocateParty "Bank"
+  alice <- allocateParty "Alice"
+
+  iouId <- submitMulti [bank, alice] [] do
+    createCmd CHFIou with
+      issuer = bank
+      owner = alice
+      amount = 42
+
+  alice `submit` do
+    exerciseCmd (toInterfaceContractId @Token iouId) (Split 10)

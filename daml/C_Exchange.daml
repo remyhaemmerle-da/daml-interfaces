@@ -1,0 +1,70 @@
+--------------------------------------------------------------
+---- Interfacs are foundamental for writing Generic Model ----
+--------------------------------------------------------------
+
+{-# LANGUAGE ApplicativeDo #-}
+
+module C_Exchange where
+
+import qualified A_Asset as Asset
+import qualified B_BandNFT as NFT
+
+import Daml.Script
+
+data EmptyView = EmptyView
+
+template ExchangeOffer with
+    offer: ContractId Asset.Asset
+    proponer: Party
+    proponee: Party
+  where
+    signatory proponer
+    observer proponee
+
+    choice CounterOffer: ContractId ExchangeCounterOffer with
+        counterOffer: ContractId Asset.Asset
+      controller proponee
+      do
+        create (ExchangeCounterOffer offer proponer proponee counterOffer)
+
+template ExchangeCounterOffer with
+    offer: ContractId Asset.Asset
+    proponer: Party
+    proponee: Party
+    counterOffer: ContractId Asset.Asset
+  where
+    signatory proponer, proponee
+
+    choice Accept: (ContractId Asset.Asset, ContractId Asset.Asset)
+      controller proponer
+      do
+        p <- exercise counterOffer (Asset.Transfer proponer)
+        a1 <- exercise p Asset.Accept
+        p <- exercise offer (Asset.Transfer proponee)
+        a2 <- exercise p Asset.Accept
+        pure (a1, a2)
+
+
+main : Script ()
+main = script do
+  band <- allocateParty "Iron Furry"
+  public <- allocateParty "Public"
+  alice <- allocateParty "Alice"
+  bob <- allocateParty "Bob"
+
+  alicesNft <- submitMulti [band, alice] [] do
+    createCmd (NFT.NFT band "Metal Storm" alice public)
+
+  bobsNft <- submitMulti [band, bob] [] do
+    createCmd (NFT.NFT band "Fire and Furry" bob public)
+
+  offer <- alice `submit` do
+    createCmd $ ExchangeOffer (Asset.toId alicesNft) alice bob
+
+  counterOffer <- bob `submit` do
+    exerciseCmd offer $ CounterOffer (Asset.toId bobsNft)
+
+  (iou3, iou4) <- submitMulti [alice] [public] do
+    exerciseCmd counterOffer Accept
+
+  pure ( )

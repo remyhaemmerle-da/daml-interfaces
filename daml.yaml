@@ -1,0 +1,9 @@
+sdk-version: 2.7.3
+name: ccy
+source: daml
+version: 1.0.0
+dependencies:
+  - daml-prim
+  - daml-stdlib
+  - daml-script
+

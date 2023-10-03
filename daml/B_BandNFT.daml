@@ -1,0 +1,79 @@
+--------------------------------------------------
+---- Interface are instantiated by Templates  ----
+--------------------------------------------------
+
+{-# LANGUAGE ApplicativeDo #-}
+
+module B_BandNFT where
+
+import qualified A_Asset as Asset
+import Daml.Script
+
+data View = View with
+    band : Party
+    id   : Text
+    fan  : Party
+  deriving Show
+
+-- templates are similar as final classes
+template NFT
+  with
+    band : Party
+    id   : Text
+    fan  : Party
+    public  : Party
+  where
+    signatory band, fan
+    observer public
+    interface instance Asset.Asset for NFT where
+      view = Asset.View band
+      assetOwner = fan
+      transfer newOwner = do
+        cid <- create $ Proposal this newOwner
+        pure $ toInterfaceContractId cid
+
+
+template Proposal
+  with
+    nft: NFT
+    proponee: Party
+  where
+    signatory signatory nft
+    observer proponee
+    interface instance Asset.Proposal for Proposal where
+      view = Asset.View nft.fan
+      proposalAsset = toInterface nft
+      proposalProponee = proponee
+      accept = do
+        cid <- create $ nft with fan = proponee
+        pure $ toInterfaceContractId cid
+      cancel = do
+        cid <- create nft
+        pure $ Asset.toId cid
+
+
+main : Script ()
+main = script do
+  band <- allocateParty "Iron Furry"
+  alice <- allocateParty "Alice"
+  bob <- allocateParty "Bob"
+  charly <- allocateParty "Charly"
+  public <- allocateParty "Public"
+
+  alicesNft <- submitMulti [band, alice] [] do
+    cid <- createCmd (NFT band "Metal Storm" alice public)
+    pure $ toInterfaceContractId @Asset.Asset cid
+
+  proposalToBob <- alice `submit` do
+    exerciseCmd alicesNft (Asset.Transfer bob)
+
+  bobNft <- bob `submit` do
+     exerciseCmd proposalToBob Asset.Accept
+
+  porposalToCharly <- bob `submit` do
+     exerciseCmd bobNft (Asset.Transfer charly)
+
+  t <- bob `submit` do
+     exerciseCmd porposalToCharly Asset.Cancel
+
+  pure ( )
