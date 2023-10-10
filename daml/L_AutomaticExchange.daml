@@ -74,8 +74,8 @@ main = script do
       band = band
       public = public
 
-  -- submitMulti [alice] [public] do
-  --   exerciseCmd offerId (Accept nftId alice (fromList [bank]))
+  submitMulti [alice] [public] do
+    exerciseCmd offerId (Accept nftId alice (fromList [bank]))
 
   pure ()
 

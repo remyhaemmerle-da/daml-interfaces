@@ -9,12 +9,6 @@ module B_BandNFT where
 import qualified A_Asset as Asset
 import Daml.Script
 
-data View = View with
-    band : Party
-    id   : Text
-    fan  : Party
-  deriving Show
-
 -- templates are similar as final classes
 template NFT
   with
@@ -25,8 +19,9 @@ template NFT
   where
     signatory band, fan
     observer public
+
     interface instance Asset.Asset for NFT where
-      view = Asset.View band
+      view = Asset.View fan
       assetOwner = fan
       transfer newOwner = do
         cid <- create $ Proposal this newOwner

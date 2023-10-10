@@ -10,7 +10,6 @@ import qualified A_Asset as Asset
 import qualified F_TokenV2 as Token
 import qualified B_BandNFT as NFT
 
-import qualified DA.List as L
 import Daml.Script
 
 template Iou with
@@ -92,8 +91,8 @@ main = script do
         owner = mallory
         amount = 42
       proponee = alice
-      --backdoor = None
-      backdoor = Some (toInterfaceContractId (L.head nftIds)._1)
+      backdoor = None
+      -- backdoor = Some (toInterfaceContractId (L.head nftIds)._1)
 
   iou <- submitMulti [alice] [public] do
     exerciseCmd (toInterfaceContractId @Asset.Proposal proposalId) Asset.Accept
